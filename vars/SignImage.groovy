@@ -1,4 +1,4 @@
-def call(String service, String harborRegistry, String harborProject) {
+def call(String service, String registry, String project) {
   withCredentials([
     usernamePassword(
       credentialsId: 'harbor-credential',
@@ -6,22 +6,20 @@ def call(String service, String harborRegistry, String harborProject) {
       passwordVariable: 'HARBOR_PASS'
     ),
     file(credentialsId: 'cosign-private-key', variable: 'COSIGN_KEY'),
-    string(credentialsId: 'cosign-password',  variable: 'COSIGN_PASSWORD')
+    string(credentialsId: 'cosign-password', variable: 'COSIGN_PASSWORD')
   ]) {
     sh """
       set -x
-      SERVICE=${service}
       IMAGE_TAG=ci-\${BUILD_NUMBER}
-      echo "from shared lib"
 
-      echo "\$HARBOR_PASS" | docker login ${harborRegistry} \\
+      echo "\$HARBOR_PASS" | docker login ${registry} \\
         -u "\$HARBOR_USER" --password-stdin
 
-      docker pull ${harborRegistry}/${harborProject}/\${SERVICE}:\$IMAGE_TAG
+      docker pull ${registry}/${project}/${service}:\${IMAGE_TAG}
 
       IMAGE_DIGEST=\$(docker inspect \\
         --format='{{index .RepoDigests 0}}' \\
-        ${harborRegistry}/${harborProject}/\${SERVICE}:\$IMAGE_TAG \\
+        ${registry}/${project}/${service}:\${IMAGE_TAG} \\
         | cut -d'@' -f2)
 
       echo "Signing digest: \$IMAGE_DIGEST"
@@ -32,7 +30,7 @@ def call(String service, String harborRegistry, String harborProject) {
         --allow-insecure-registry \\
         --allow-http-registry \\
         --yes \\
-        ${harborRegistry}/${harborProject}/\${SERVICE}@\$IMAGE_DIGEST
+        ${registry}/${project}/${service}@\${IMAGE_DIGEST}
     """
   }
 }
