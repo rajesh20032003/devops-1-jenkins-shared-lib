@@ -1,4 +1,17 @@
+/**
+ * buildAndPush(service, harborRegistry, harborProject)
+ *
+ * Builds a Docker image using an isolated buildx builder and pushes to Harbor.
+ * Always cleans up the builder even if build or push fails.
+ *
+ * @param service        - service folder name (e.g. 'frontend', 'gateway')
+ * @param harborRegistry - Harbor host (e.g. '34.180.10.118')
+ * @param harborProject  - Harbor project (e.g. 'micro-dash')
+ */
 def call(String service, String harborRegistry, String harborProject) {
+  // FIX 1: builderName defined as Groovy variable so finally block can use it
+  def builderName = "ci-builder-${service}-${env.BUILD_NUMBER}"
+
   withCredentials([
     usernamePassword(
       credentialsId: 'harbor-credential',
@@ -6,53 +19,56 @@ def call(String service, String harborRegistry, String harborProject) {
       passwordVariable: 'HARBOR_PASS'
     )
   ]) {
-    sh """
-      set -x
+    // FIX 2: try block added — wraps withCredentials body
+    try {
+      sh """
+        set -x
 
-      SERVICE=${service}
-      IMAGE_TAG=ci-\${BUILD_NUMBER}
-      BUILDER_NAME=ci-builder-\${SERVICE}-\${BUILD_NUMBER}
+        IMAGE_TAG=ci-\${BUILD_NUMBER}
 
-      echo "\$HARBOR_PASS" | docker login ${harborRegistry} \\
-        -u "\$HARBOR_USER" --password-stdin
+        echo "\$HARBOR_PASS" | docker login ${harborRegistry} \\
+          -u "\$HARBOR_USER" --password-stdin
 
-      # Write insecure-registry config for BuildKit
-      mkdir -p /tmp/buildkit
-      cat > /tmp/buildkit/buildkitd-\${SERVICE}.toml << 'TOML'
+        # Write insecure-registry config for BuildKit
+        mkdir -p /tmp/buildkit
+        cat > /tmp/buildkit/buildkitd-${service}.toml << 'TOML'
 [registry."${harborRegistry}"]
   http = true
   insecure = true
 TOML
 
-      # Remove any stale builder metadata
-      rm -rf \$HOME/.docker/buildx/instances/\${BUILDER_NAME}  || true
-      rm -rf \$HOME/.docker/buildx/activity/\${BUILDER_NAME}   || true
-      rm -rf \$HOME/.docker/buildx/refs/\${BUILDER_NAME}       || true
-      docker rm -f buildx_buildkit_\${BUILDER_NAME}0            || true
+        # Remove any stale builder metadata
+        rm -rf \$HOME/.docker/buildx/instances/${builderName} || true
+        rm -rf \$HOME/.docker/buildx/activity/${builderName}  || true
+        rm -rf \$HOME/.docker/buildx/refs/${builderName}      || true
+        docker rm -f buildx_buildkit_${builderName}0          || true
 
-      docker buildx create \\
-        --name \$BUILDER_NAME \\
-        --driver docker-container \\
-        --driver-opt network=host \\
-        --config /tmp/buildkit/buildkitd-\${SERVICE}.toml \\
-        --use
+        docker buildx create \\
+          --name ${builderName} \\
+          --driver docker-container \\
+          --driver-opt network=host \\
+          --config /tmp/buildkit/buildkitd-${service}.toml \\
+          --use
 
-      docker buildx inspect --bootstrap
+        docker buildx inspect --bootstrap
 
-      docker buildx build \\
-        --builder \$BUILDER_NAME \\
-        --cache-from=type=registry,ref=${harborRegistry}/${harborProject}/\${SERVICE}:buildcache \\
-        --cache-to=type=registry,ref=${harborRegistry}/${harborProject}/\${SERVICE}:buildcache,mode=max \\
-        -t ${harborRegistry}/${harborProject}/\${SERVICE}:\$IMAGE_TAG \\
-        --push \\
-        ./\${SERVICE}
-    """
-  }
-  finally {
-      // ALWAYS remove the builder — even if build or push failed
+        docker buildx build \\
+          --builder ${builderName} \\
+          --cache-from=type=registry,ref=${harborRegistry}/${harborProject}/${service}:buildcache \\
+          --cache-to=type=registry,ref=${harborRegistry}/${harborProject}/${service}:buildcache,mode=max \\
+          -t ${harborRegistry}/${harborProject}/${service}:\${IMAGE_TAG} \\
+          --push \\
+          ./${service}
+
+        echo "Pushed ${harborRegistry}/${harborProject}/${service}:\${IMAGE_TAG}"
+      """
+    } finally {
+      // FIX 3: finally is inside withCredentials, uses Groovy builderName variable
       sh """
         docker buildx rm ${builderName} --force || true
+        docker volume rm buildx_buildkit_${builderName}_state || true
         echo "Cleaned up builder: ${builderName}"
       """
     }
+  }
 }
