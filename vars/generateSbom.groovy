@@ -10,7 +10,7 @@ def call(String service, String harborRegistry, String harborProject) {
       set -x
       SERVICE=${service}
       IMAGE_TAG=ci-\${BUILD_NUMBER}
-
+      echo "from shared-lib"
       echo "\$HARBOR_PASS" | docker login ${harborRegistry} \\
         -u "\$HARBOR_USER" --password-stdin
 
