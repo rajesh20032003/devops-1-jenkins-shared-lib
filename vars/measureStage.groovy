@@ -3,8 +3,8 @@ def call(String stageName, Closure body) {
   try {
     body()
   } finally {
-    // Always push duration even if the stage fails
     def durationMs = System.currentTimeMillis() - start
+    echo "Stage [${stageName}] completed in ${durationMs}ms"
     recordMetrics(
       stage:      stageName.replaceAll('[^a-zA-Z0-9]', '_'),
       durationMs: durationMs

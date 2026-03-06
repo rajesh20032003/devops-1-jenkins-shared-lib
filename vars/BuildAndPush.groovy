@@ -48,4 +48,11 @@ TOML
         ./\${SERVICE}
     """
   }
+  finally {
+      // ALWAYS remove the builder — even if build or push failed
+      sh """
+        docker buildx rm ${builderName} --force || true
+        echo "Cleaned up builder: ${builderName}"
+      """
+    }
 }
