@@ -1,13 +1,13 @@
 def call(String stageName, Closure body) {
-
-    def start = System.currentTimeMillis()
-
+  def start = System.currentTimeMillis()
+  try {
     body()
-
-    def end = System.currentTimeMillis()
-
-    def duration = (end - start) / 1000
-
-    echo "METRIC: ${stageName} took ${duration} seconds"
-
+  } finally {
+    // Always push duration even if the stage fails
+    def durationMs = System.currentTimeMillis() - start
+    recordMetrics(
+      stage:      stageName.replaceAll('[^a-zA-Z0-9]', '_'),
+      durationMs: durationMs
+    )
+  }
 }
