@@ -44,13 +44,18 @@ def call(Map args = [:]) {
       // Using PUT so each build gets its own slot and old data is replaced
       writeFile file: 'metrics_payload.txt', text: payload
       sh """
-        curl --silent --show-error --fail \
-          --request PUT \
-          --data-binary @metrics_payload.txt \
-          "\${PUSHGATEWAY_URL}/metrics/job/${jobName}/instance/build_${buildNumber}" \
-          && echo "Pushed metrics: stage=${stageName} build=${buildNumber}" \
-          || echo "WARNING: Failed to push metrics (non-blocking)"
-      """
+  # Install curl if not present (node:22-alpine doesn't have it)
+  if ! command -v curl > /dev/null 2>&1; then
+    apk add --no-cache curl > /dev/null 2>&1 || apt-get install -y curl > /dev/null 2>&1 || true
+  fi
+
+  curl --silent --show-error --fail \\
+    --request PUT \\
+    --data-binary @metrics_payload.txt \\
+    "\${PUSHGATEWAY_URL}/metrics/job/${jobName}/instance/build_${buildNumber}" \\
+    && echo "Pushed metrics: stage=${stageName} build=${buildNumber}" \\
+    || echo "WARNING: Failed to push metrics (non-blocking)"
+"""
     }
   }
 }
