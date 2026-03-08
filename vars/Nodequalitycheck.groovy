@@ -1,40 +1,50 @@
 /**
- * nodeQualityCheck(service, extraSteps)
+ * nodeQualityCheck(service, extraSteps, lintOnly)
  *
- * Runs lint + unit tests + coverage for a Node.js service
- * inside a Kubernetes pod (node:22-alpine container)
+ * Runs quality checks for a Node.js service inside a Kubernetes pod.
  *
- * What happens behind the scenes:
- * 1. podTemplate() tells Jenkins Kubernetes plugin: "create a pod with these containers"
- * 2. node(POD_LABEL) tells Jenkins: "run the following steps on that pod"
- * 3. checkout scm: clones the repo into the pod's workspace
- * 4. container('node'): switches execution into node:22-alpine container
- * 5. npm steps run inside node container
- * 6. recordMetrics runs in jnlp container (has curl, can reach pushgateway)
- * 7. stash copies coverage files through JNLP tunnel to Jenkins controller
- * 8. pod is deleted automatically after node(POD_LABEL) block exits
+ * For backend services (gateway, user-service, order-service):
+ *   - lint + unit tests + coverage
+ *   - publishes junit results and coverage to Jenkins UI
+ *   - stashes coverage for SonarQube stage
  *
- * @param service     - service folder name e.g. 'gateway', 'user-service'
- * @param extraSteps  - optional closure for extra steps e.g. jest cache clear
+ * For frontend (lintOnly = true):
+ *   - only runs npm run lint:html
+ *   - no tests, no coverage, no stash
+ *   - frontend has no unit tests currently
+ *
+ * How it works behind the scenes:
+ *   1. podTemplate() registers pod definition with Kubernetes plugin
+ *   2. node(POD_LABEL) triggers pod creation in jenkins namespace on Harbor VM
+ *   3. jnlp container connects back to Jenkins on port 50000
+ *   4. checkout scm clones repo into shared pod workspace
+ *   5. container('node') switches execution into node:22-alpine
+ *   6. npm steps run inside node container
+ *   7. after container('node') block — back in jnlp container
+ *   8. junit, recordCoverage, stash run in jnlp (debian, has all tools)
+ *   9. recordMetrics pushes to pushgateway via curl (jnlp has curl)
+ *  10. pod deleted automatically when node(POD_LABEL) block exits
+ *
+ * @param service     - service folder name e.g. 'gateway', 'frontend'
+ * @param extraSteps  - optional closure for extra steps e.g. jest --clearCache
+ * @param lintOnly    - true for frontend (no tests), false for backend services
  */
-def call(String service, Closure extraSteps = null) {
+def call(String service, Closure extraSteps = null, Boolean lintOnly = false) {
 
   def metricLabel = "Quality_Check_${service.replaceAll('[^a-zA-Z0-9]', '_')}"
 
-  // ── Pod definition ────────────────────────────────────────────────────────
-  // This YAML defines what containers the pod will have
-  // Kubernetes plugin reads this and creates the pod when job runs
+  // Pod YAML definition
+  // Two containers:
+  //   jnlp: connects back to Jenkins — MUST NOT have command/args override
+  //   node: runs npm steps — needs sleep 99d to stay alive
   def podYaml = """
 apiVersion: v1
 kind: Pod
 spec:
   containers:
 
-  # jnlp container — MANDATORY
-  # jenkins/inbound-agent automatically connects back to Jenkins on port 50000
-  # DO NOT add command/args here — it would override the connect script
-  # This container also runs: stash, unstash, recordMetrics, junit, recordCoverage
-  # because those are Jenkins pipeline steps that run in the "default" container
+  # jnlp — mandatory, handles Jenkins ↔ pod communication
+  # jenkins/inbound-agent is debian-based → has curl → recordMetrics works
   - name: jnlp
     image: jenkins/inbound-agent:latest
     resources:
@@ -45,116 +55,123 @@ spec:
         memory: "512Mi"
         cpu: "200m"
 
-  # node container — runs npm steps
-  # sleep 99d keeps it alive so Jenkins can send commands to it
-  # without sleep it would exit immediately (no default long-running cmd)
+  # node — runs all npm commands
+  # sleep 99d = keep container alive so Jenkins can send commands
+  # without sleep: container exits immediately after starting → pod fails
   - name: node
     image: node:22-alpine
     command: ['sleep']
     args: ['99d']
     resources:
       requests:
-        memory: "512Mi"   # minimum guaranteed RAM for this container
-        cpu: "250m"       # 250 millicores = 0.25 CPU cores guaranteed
+        memory: "512Mi"
+        cpu: "250m"
       limits:
-        memory: "1Gi"     # maximum RAM — K8s kills container if exceeded
-        cpu: "500m"       # maximum CPU — throttled if exceeded
+        memory: "1Gi"
+        cpu: "500m"
     volumeMounts:
-    # mount npm cache volume so npm ci uses cached packages
-    # without this every build downloads all packages from internet
+    # npm cache volume — reused within the pod lifetime
+    # speeds up npm ci by avoiding re-downloading packages
     - name: npm-cache
       mountPath: /home/node/.npm
 
   volumes:
-  # emptyDir = temporary volume, created when pod starts, deleted when pod ends
-  # lives as long as the pod — shared between all containers in the pod
-  # faster than downloading from internet, slower than persistent cache
+  # emptyDir = temporary volume tied to pod lifecycle
+  # created when pod starts, destroyed when pod ends
+  # all containers in pod share this volume
   - name: npm-cache
     emptyDir: {}
 """
 
-  // ── podTemplate() ─────────────────────────────────────────────────────────
-  // Registers the pod definition with the Kubernetes plugin
-  // Does NOT create the pod yet — just defines what it will look like
-  // POD_LABEL is auto-generated unique label e.g. "quality-pod-abc123"
-  //def podLabel = "quality-${service}-${env.BUILD_NUMBER}"
+  // podTemplate() — registers the pod spec with Kubernetes plugin
+  // does NOT create pod yet — just defines what it will look like
+  // POD_LABEL — auto-generated unique label injected by Kubernetes plugin
+  // e.g. "kubernetes-abc123" — used by node() to target this specific pod
   podTemplate(yaml: podYaml) {
 
-    // ── node(POD_LABEL) ───────────────────────────────────────────────────
-    // NOW the pod is actually created in K8s jenkins namespace
-    // Jenkins waits for jnlp container to connect back on port 50000
-    // Once connected — executes everything inside this block on the pod
-    // When block exits — Jenkins deletes the pod automatically
-    node(pod_LABEL) {
+    // node(POD_LABEL) — NOW the pod is actually created in K8s
+    // Jenkins waits for jnlp to connect back on port 50000
+    // everything inside this block runs on the pod
+    // when block exits → Jenkins deletes the pod automatically
+    node(POD_LABEL) {
 
-      // Clone the repo into the pod's workspace
-      // Without this the pod has no source code to work with
-      // POD workspace = /home/jenkins/agent/workspace/
-      // All containers in the pod share this same workspace directory
+      // clone repo into pod workspace: /home/jenkins/agent/workspace/
+      // all containers share this same directory
+      // node container writes files here → jnlp container can read them
       checkout scm
 
       def start = System.currentTimeMillis()
 
-      // ── container('node') ───────────────────────────────────────────────
-      // Switches execution context INTO the node:22-alpine container
-      // All sh steps inside here run in node container
-      // Files written here are visible to jnlp container (shared workspace)
+      // container('node') — switches execution into node:22-alpine
+      // all sh steps inside run in the node container
+      // files written here visible to jnlp (shared workspace volume)
       container('node') {
         dir(service) {
-          // Remove old node_modules — ensures clean install
+          // clean install — no leftover node_modules from previous builds
           sh 'rm -rf node_modules'
 
-          // Install dependencies using lock file
-          // --prefer-offline: use cache first, download only if needed
-          // --no-audit: skip security audit (we use trivy for that)
-          // --cache: use mounted npm cache volume
+          // install exact versions from package-lock.json
+          // --prefer-offline: use npm cache volume first
+          // --no-audit: skip vuln scan (trivy handles that separately)
+          // --cache: point to mounted npm cache volume
           sh 'npm ci --prefer-offline --no-audit --cache /home/node/.npm'
 
-          // Run linter with auto-fix
-          // || true: don't fail pipeline on lint warnings
-          sh 'npm run lint -- --fix'
+          if (lintOnly) {
+            // ── Frontend path ────────────────────────────────────────────
+            // frontend uses different lint command (HTML linter)
+            // || true: lint warnings don't fail the pipeline
+            // no tests, no coverage — frontend has no unit tests yet
+            sh 'npm run lint:html || true'
 
-          // Run extra steps if provided e.g. jest --clearCache
-          if (extraSteps) { extraSteps() }
+          } else {
+            // ── Backend path (gateway, user-service, order-service) ──────
+            // standard lint with auto-fix
+            sh 'npm run lint -- --fix'
 
-          // Run tests with coverage
-          // --coverage: generate coverage reports
-          // --coverageReporters=lcov: generate lcov.info for SonarQube
-          // --ci: non-interactive mode, fail on test failure
-          // --reporters=jest-junit: generate junit XML for Jenkins
-          sh 'npm test -- --coverage --coverageReporters=lcov --ci --reporters=default --reporters=jest-junit'
+            // run extra steps if provided
+            // e.g. order-service passes: sh 'npx jest --clearCache'
+            if (extraSteps) { extraSteps() }
+
+            // run tests with full coverage reporting
+            // --coverage:               generate coverage files
+            // --coverageReporters=lcov: generate lcov.info for SonarQube
+            // --ci:                     non-interactive, fail on error
+            // --reporters=jest-junit:   generate junit XML for Jenkins UI
+            sh 'npm test -- --coverage --coverageReporters=lcov --ci --reporters=default --reporters=jest-junit'
+          }
         }
       }
-      // ── back in jnlp container now ───────────────────────────────────────
+      // ── execution back in jnlp container now ────────────────────────────
       // coverage files written by node container are visible here
-      // because both containers share /home/jenkins/agent/workspace/
+      // because both containers mount the same workspace volume
 
-      // Publish JUnit test results to Jenkins UI
-      // reads the XML file generated by jest-junit reporter
-      // shows pass/fail count in Jenkins build summary
-      junit allowEmptyResults: true, testResults: "${service}/coverage/junit.xml"
+      if (!lintOnly) {
+        // publish test results to Jenkins UI
+        // reads junit XML → shows pass/fail counts in build summary
+        junit allowEmptyResults: true, testResults: "${service}/coverage/junit.xml"
 
-      // Publish coverage report to Jenkins UI
-      // reads lcov.info generated by jest --coverage
-      // shows line/branch/function coverage percentages
-      recordCoverage tools: [[parser: 'LCOV', pattern: "${service}/coverage/lcov.info"]]
+        // publish coverage percentages to Jenkins UI
+        // reads lcov.info → shows line/branch/function coverage
+        recordCoverage tools: [[parser: 'LCOV', pattern: "${service}/coverage/lcov.info"]]
 
-      // Stash coverage files so SonarQube stage can use them
-      // stash copies files through JNLP tunnel → Jenkins controller storage
-      // SonarQube runs on Jenkins VM (agent any) — needs these files
-      // without stash: coverage files die with the pod
-      // with stash: files survive in Jenkins controller until unstashed
-      stash name: "coverage-${service}",
-            includes: "${service}/coverage/**",
-            allowEmpty: true
+        // stash coverage files for SonarQube stage
+        // SonarQube runs on Jenkins VM (agent any) — different machine
+        // stash copies files: pod → JNLP tunnel → Jenkins controller storage
+        // SonarQube stage will unstash them before running sonar-scanner
+        // without stash: coverage files die with the pod ❌
+        // with stash: files survive in Jenkins until unstashed ✅
+        stash name: "coverage-${service}",
+              includes: "${service}/coverage/**",
+              allowEmpty: true
+      }
 
-      // Record metrics — runs in jnlp container
-      // jnlp container has curl (jenkins/inbound-agent is debian-based)
-      // can reach pushgateway at http://pushgateway:9091
-      // previously this failed because node:22-alpine has no curl
+      // recordMetrics runs in jnlp container (debian-based, has curl)
+      // pushes duration metric to Pushgateway → visible in Grafana
+      // previously failed when running inside node:22-alpine (no curl)
+      // now works because we're back in jnlp container here
       def durationMs = System.currentTimeMillis() - start
       recordMetrics(stage: metricLabel, durationMs: durationMs)
 
-    } // pod deleted here — K8s removes it from jenkins namespace
+    } // pod deleted here automatically
   }
 }
