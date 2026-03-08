@@ -77,15 +77,15 @@ spec:
   // Registers the pod definition with the Kubernetes plugin
   // Does NOT create the pod yet — just defines what it will look like
   // POD_LABEL is auto-generated unique label e.g. "quality-pod-abc123"
-  def podLabel = "quality-${service}-${env.BUILD_NUMBER}"
-  podTemplate(yaml: podYaml, label: podLabel) {
+  //def podLabel = "quality-${service}-${env.BUILD_NUMBER}"
+  podTemplate(yaml: podYaml) {
 
     // ── node(POD_LABEL) ───────────────────────────────────────────────────
     // NOW the pod is actually created in K8s jenkins namespace
     // Jenkins waits for jnlp container to connect back on port 50000
     // Once connected — executes everything inside this block on the pod
     // When block exits — Jenkins deletes the pod automatically
-    node(podLabel) {
+    node(pod_LABEL) {
 
       // Clone the repo into the pod's workspace
       // Without this the pod has no source code to work with
