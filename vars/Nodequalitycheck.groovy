@@ -78,7 +78,7 @@ spec:
   // Does NOT create the pod yet — just defines what it will look like
   // POD_LABEL is auto-generated unique label e.g. "quality-pod-abc123"
   def podLabel = "quality-${service}-${env.BUILD_NUMBER}"
-  podTemplate(yaml: podYaml, label: "quality-${service}") {
+  podTemplate(yaml: podYaml, label: podLabel) {
 
     // ── node(POD_LABEL) ───────────────────────────────────────────────────
     // NOW the pod is actually created in K8s jenkins namespace
