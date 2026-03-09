@@ -74,7 +74,7 @@ spec:
         stash name: "coverage-${service}",
               includes: "${service}/coverage/**",
               allowEmpty: true
-        archiveArtifacts artifacts: "${service}/coverage/lcov-report/**",
+        archiveArtifacts artifacts: testResults: "${service}/junit.xml",
                  allowEmptyArchive: true
       }
 
