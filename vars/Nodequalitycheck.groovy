@@ -73,7 +73,9 @@ spec:
     # npm cache volume — reused within the pod lifetime
     # speeds up npm ci by avoiding re-downloading packages
     - name: npm-cache
-      mountPath: /home/node/.npm
+      hostPath:
+        path: /tmp/npm-cache-${service}
+        type" DirectoryOrCreate
 
   volumes:
   # emptyDir = temporary volume tied to pod lifecycle
@@ -98,7 +100,14 @@ spec:
       // clone repo into pod workspace: /home/jenkins/agent/workspace/
       // all containers share this same directory
       // node container writes files here → jnlp container can read them
-      checkout scm
+      checkout([
+  $class: 'GitSCM',
+  branches: scm.branches,
+  extensions: [
+    [$class: 'CloneOption', shallow: true, depth: 1]
+  ],
+  userRemoteConfigs: scm.userRemoteConfigs
+])
 
       def start = System.currentTimeMillis()
 
