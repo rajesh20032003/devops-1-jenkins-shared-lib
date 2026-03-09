@@ -69,14 +69,17 @@ spec:
       }
 
       if (!lintOnly) {
-        junit allowEmptyResults: true, testResults: "${service}/coverage/junit.xml"
-        recordCoverage tools: [[parser: 'LCOV', pattern: "${service}/coverage/lcov.info"]]
-        stash name: "coverage-${service}",
-              includes: "${service}/coverage/**",
-              allowEmpty: true
-        archiveArtifacts artifacts: testResults: "${service}/junit.xml",
-                 allowEmptyArchive: true
-      }
+  junit allowEmptyResults: true, testResults: "${service}/junit.xml"
+  
+  recordCoverage tools: [[parser: 'LCOV', pattern: "${service}/coverage/lcov.info"]]
+  
+  stash name: "coverage-${service}",
+        includes: "${service}/coverage/**, ${service}/junit.xml",
+        allowEmpty: true
+        
+  archiveArtifacts artifacts: "${service}/coverage/lcov-report/**",
+                   allowEmptyArchive: true
+}
 
       def durationMs = System.currentTimeMillis() - start
       recordMetrics(stage: metricLabel, durationMs: durationMs)
