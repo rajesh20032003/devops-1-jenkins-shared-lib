@@ -74,6 +74,8 @@ spec:
         stash name: "coverage-${service}",
               includes: "${service}/coverage/**",
               allowEmpty: true
+        archiveArtifacts artifacts: "${service}/coverage/lcov-report/**",
+                 allowEmptyArchive: true
       }
 
       def durationMs = System.currentTimeMillis() - start
