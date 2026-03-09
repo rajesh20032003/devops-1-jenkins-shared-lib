@@ -9,6 +9,7 @@ spec:
   containers:
   - name: jnlp
     image: jenkins/inbound-agent:latest
+    imagePullPolicy: IfNotPresent
     resources:
       requests:
         memory: "256Mi"
@@ -19,6 +20,7 @@ spec:
 
   - name: node
     image: node:22-alpine
+    imagePullPolicy: IfNotPresent
     command: ['sleep']
     args: ['99d']
     resources:
