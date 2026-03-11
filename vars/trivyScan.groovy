@@ -18,6 +18,7 @@ def call(String service, String harborRegistry, String harborProject) {
         --skip-version-check \\
         --image-src remote \\
         --insecure \\
+        --cache-dir /tmp/trivy-cache-${service} \\
         --username \$HARBOR_USER \\
         --password \$HARBOR_PASS \\
         ${harborRegistry}/${harborProject}/\${SERVICE}:\$IMAGE_TAG
