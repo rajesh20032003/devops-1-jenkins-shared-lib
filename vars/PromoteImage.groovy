@@ -9,6 +9,7 @@ def call(String service, String harborRegistry, String harborProject, String ecr
   ]) {
     sh """
       set -x
+      echo "running"
       CI_TAG=ci-\${BUILD_NUMBER}
       FINAL_TAG=\${TAG_NAME:-dev-\${BUILD_NUMBER}}
 
