@@ -23,11 +23,15 @@ def call(String service, String harborRegistry, String harborProject, String ecr
           --password-stdin ${ecrRegistry}
 
       # cosign copy with HTTP registry support
-      COSIGN_INSECURE_IGNORE_SCTS=1 cosign copy \\
-        --allow-insecure-registry \\
-        --allow-http-registry \\
-        34.133.110.141:80/${harborProject}/${service}:\${CI_TAG} \\
-        ${ecrRegistry}/${service}:\${FINAL_TAG}
+      COSIGN_INSECURE_IGNORE_SCTS=1 \
+COSIGN_DOCKER_MEDIA_TYPES=1 \
+cosign copy \
+  --allow-insecure-registry \
+  --allow-http-registry \
+  --registry-username "$HARBOR_USER" \
+  --registry-password "$HARBOR_PASS" \
+  34.133.110.141:80/micro-dash/frontend:${CI_TAG} \
+  760302898980.dkr.ecr.ap-south-1.amazonaws.com/frontend:${FINAL_TAG}
 
       echo "✅ Promoted with signatures: \${CI_TAG} → \${FINAL_TAG}"
     """
