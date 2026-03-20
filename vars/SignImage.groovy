@@ -1,36 +1,39 @@
-def call(String service, String registry, String project) {
+def call(String service, String ecrRegistry) {
   withCredentials([
-    usernamePassword(
-      credentialsId: 'harbor-credential',
-      usernameVariable: 'HARBOR_USER',
-      passwordVariable: 'HARBOR_PASS'
-    ),
-    file(credentialsId: 'cosign-private-key', variable: 'COSIGN_KEY'),
-    string(credentialsId: 'cosign-password', variable: 'COSIGN_PASSWORD')
+    [$class: 'AmazonWebServicesCredentialsBinding',
+     credentialsId: 'aws-ecr-credentials'],
+    file(credentialsId: 'cosign-private-key',
+         variable: 'COSIGN_KEY'),
+    string(credentialsId: 'cosign-password',
+           variable: 'COSIGN_PASSWORD')
   ]) {
     sh """
       set -x
-      IMAGE_TAG=ci-\${BUILD_NUMBER}
+      FINAL_TAG=\${TAG_NAME:-dev-\${BUILD_NUMBER}}
 
-      echo "\$HARBOR_PASS" | docker login ${registry} \\
-        -u "\$HARBOR_USER" --password-stdin
+      # Login to ECR
+      aws ecr get-login-password --region ap-south-1 \\
+        | docker login --username AWS \\
+          --password-stdin ${ecrRegistry}
 
-      docker pull ${registry}/${project}/${service}:\${IMAGE_TAG}
+      # Pull to get digest
+      docker pull ${ecrRegistry}/${service}:\${FINAL_TAG}
 
       IMAGE_DIGEST=\$(docker inspect \\
         --format='{{index .RepoDigests 0}}' \\
-        ${registry}/${project}/${service}:\${IMAGE_TAG} \\
+        ${ecrRegistry}/${service}:\${FINAL_TAG} \\
         | cut -d'@' -f2)
 
-      echo "Signing digest: \$IMAGE_DIGEST"
+      echo "Signing ECR image: \$IMAGE_DIGEST"
 
+      # Sign ECR image!
       COSIGN_PASSWORD=\$COSIGN_PASSWORD \\
       cosign sign \\
         --key \$COSIGN_KEY \\
-        --allow-insecure-registry \\
-        --allow-http-registry \\
         --yes \\
-        ${registry}/${project}/${service}@\${IMAGE_DIGEST}
+        ${ecrRegistry}/${service}@\${IMAGE_DIGEST}
+
+      echo "✅ ${service} signed in ECR!"
     """
   }
 }

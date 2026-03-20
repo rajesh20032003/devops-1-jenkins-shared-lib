@@ -25,15 +25,19 @@ def call(String service, String harborRegistry,
         | docker login --username AWS \\
           --password-stdin ${ecrRegistry}
 
-      # cosign copy = image + signature!
-      COSIGN_INSECURE_IGNORE_SCTS=1 \\
-      cosign copy \\
-        --allow-http-registry \\
-        --allow-insecure-registry \\
-        ${harborRegistry}:80/${harborProject}/${service}:\${CI_TAG} \\
+      # Pull from Harbor
+      docker pull \\
+        ${harborRegistry}/${harborProject}/${service}:\${CI_TAG}
+
+      # Tag for ECR
+      docker tag \\
+        ${harborRegistry}/${harborProject}/${service}:\${CI_TAG} \\
         ${ecrRegistry}/${service}:\${FINAL_TAG}
 
-      echo "Promoted: \${CI_TAG} to \${FINAL_TAG}"
+      # Push to ECR
+      docker push ${ecrRegistry}/${service}:\${FINAL_TAG}
+
+      echo "✅ Promoted: \${CI_TAG} → \${FINAL_TAG}"
     """
   }
 }
