@@ -24,7 +24,6 @@ def call(String service, String harborRegistry, String harborProject) {
       sh """
         set -x
 
-        IMAGE_TAG=ci-\${BUILD_NUMBER}
 
         echo "\$HARBOR_PASS" | docker login ${harborRegistry} \\
           -u "\$HARBOR_USER" --password-stdin
@@ -56,7 +55,7 @@ TOML
           --builder ${builderName} \\
           --cache-from=type=registry,ref=${harborRegistry}/${harborProject}/${service}:buildcache \\
           --cache-to=type=registry,ref=${harborRegistry}/${harborProject}/${service}:buildcache,mode=max \\
-          -t ${harborRegistry}/${harborProject}/${service}:\${IMAGE_TAG} \\
+          -t ${harborRegistry}/${harborProject}/${service}:${env.IMAGE_TAG} \\
           --push \\
           ./${service}
 
