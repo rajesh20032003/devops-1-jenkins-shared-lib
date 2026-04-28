@@ -13,7 +13,7 @@ def call(String service, String harborRegistry,
       set -e
       set -x
 
-      CI_TAG=ci-\${BUILD_NUMBER}
+      CI_TAG=ci-\${env.IMAGE_TAG}
       FINAL_TAG=\${TAG_NAME:-dev-\${BUILD_NUMBER}}
 
       # Login to Harbor
