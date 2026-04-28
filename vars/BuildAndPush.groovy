@@ -54,7 +54,7 @@ TOML
 
         docker buildx build \\
           --builder ${builderName} \\
-          --no-cache 
+          --no-cache \\
           --cache-from=type=registry,ref=${harborRegistry}/${harborProject}/${service}:buildcache \\
           --cache-to=type=registry,ref=${harborRegistry}/${harborProject}/${service}:buildcache,mode=max \\
           -t ${harborRegistry}/${harborProject}/${service}:\${IMAGE_TAG} \\
