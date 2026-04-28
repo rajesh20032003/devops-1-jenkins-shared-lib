@@ -9,7 +9,7 @@ def call(String service, String ecrRegistry) {
   ]) {
     sh """
       set -x
-      FINAL_TAG=\${TAG_NAME:-dev-\${BUILD_NUMBER}}
+      FINAL_TAG=\$IMAGE_TAG-PROD
 
       # Login to ECR
       aws ecr get-login-password --region ap-south-1 \\

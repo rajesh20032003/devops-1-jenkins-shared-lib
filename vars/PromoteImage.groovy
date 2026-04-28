@@ -1,8 +1,6 @@
-def call(String service, String harborRegistry,
-         String harborProject, String ecrRegistry) {
+def call(String service, String harborRegistry, String harborProject, String ecrRegistry) {
   withCredentials([
-    [$class: 'AmazonWebServicesCredentialsBinding',
-     credentialsId: 'aws-ecr-credentials'],
+    [$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-ecr-credentials'],
     usernamePassword(
       credentialsId: 'harbor-credential',
       usernameVariable: 'HARBOR_USER',
@@ -13,8 +11,10 @@ def call(String service, String harborRegistry,
       set -e
       set -x
 
-      CI_TAG=ci-\$IMAGE_TAG
-      FINAL_TAG=\${TAG_NAME:-dev-\${BUILD_NUMBER}}
+      # FIX: Access the environment variable securely. 
+      # We use \$ to let Bash handle it, or just use the env name.
+      CI_TAG=\$IMAGE_TAG
+      FINAL_TAG=\$IMAGE_TAG-PROD
 
       # Login to Harbor
       echo "\$HARBOR_PASS" | docker login ${harborRegistry} \\
@@ -25,9 +25,8 @@ def call(String service, String harborRegistry,
         | docker login --username AWS \\
           --password-stdin ${ecrRegistry}
 
-      # Pull from Harbor
-      docker pull \\
-        ${harborRegistry}/${harborProject}/${service}:\${CI_TAG}
+      # Pull from Harbor - Notice the backslash before CI_TAG
+      docker pull ${harborRegistry}/${harborProject}/${service}:\${CI_TAG}
 
       # Tag for ECR
       docker tag \\
